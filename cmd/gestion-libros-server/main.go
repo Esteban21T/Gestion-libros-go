@@ -1,12 +1,11 @@
+// cmd/gestion-libros-server/main.go
 package main
 
 import (
-	"bufio"
-	"fmt"
+	"html/template"
 	"net/http"
-	"os"
+	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/Esteban21T/Sistemas-de-Gesti-n-empresarial.git/pkg/models"
@@ -32,119 +31,55 @@ func loadData() error {
 	return nil
 }
 
-// saveData guarda los libros en el archivo JSON.
+// saveData guarda el slice de libros en el archivo JSON.
 func saveData() error {
 	return storage.SaveBooks(dataFile, books)
 }
 
 func main() {
-	// Cargar datos al iniciar
+	// 1. Cargar datos
 	if err := loadData(); err != nil {
-		fmt.Println("Error al cargar datos:", err)
-		return
+		panic("Error al cargar datos: " + err.Error())
 	}
 
-	// Ejecutar servidor web en segundo plano
-	go runWebServer()
-
-	// CLI para gestión interactiva
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Println("\n> Opciones: register | search | list | exit")
-		fmt.Print("> ")
-		input, _ := reader.ReadString('\n')
-		cmd := strings.TrimSpace(input)
-
-		switch cmd {
-		case "register":
-			var b models.Book
-			fmt.Print("Título: ")
-			b.Title, _ = reader.ReadString('\n')
-			fmt.Print("Autor: ")
-			b.Author, _ = reader.ReadString('\n')
-			fmt.Print("Género: ")
-			b.Genre, _ = reader.ReadString('\n')
-			fmt.Print("Año: ")
-			fmt.Fscan(reader, &b.Year)
-			reader.ReadString('\n') // limpiar buffer
-
-			// Evitar shadowing
-			var err error
-			books, err = service.RegisterBook(books, b)
-			if err != nil {
-				fmt.Println("❌", err)
-			} else {
-				saveData()
-				fmt.Println("✅ Libro registrado.")
-			}
-
-		case "search":
-			fmt.Print("Campo (title/author/genre): ")
-			field, _ := reader.ReadString('\n')
-			field = strings.TrimSpace(field)
-			fmt.Print("Término: ")
-			term, _ := reader.ReadString('\n')
-			term = strings.TrimSpace(term)
-			var resultados []models.Book
-			switch field {
-			case "title":
-				resultados = service.SearchByTitle(books, term)
-			case "author":
-				resultados = service.SearchByAuthor(books, term)
-			case "genre":
-				resultados = service.SearchByGenre(books, term)
-			default:
-				fmt.Println("Campo inválido.")
-				continue
-			}
-			service.ListBooks(resultados)
-
-		case "list":
-			service.ListBooks(books)
-
-		case "exit":
-			fmt.Println("Saliendo…")
-			return
-
-		default:
-			fmt.Println("Comando no reconocido.")
-		}
-	}
-}
-
-// runWebServer configura y arranca el servidor HTTP con servicios REST.
-func runWebServer() {
+	// 2. Configurar router
 	router := gin.Default()
 
-	// 1. Salud del servicio
+	// 3. Cargar plantillas HTML desde web/templates
+	router.SetHTMLTemplate(template.Must(
+		template.ParseGlob(filepath.Join("web", "templates", "*.html")),
+	))
+	// 4. Servir archivos estáticos
+	router.Static("/static", filepath.Join("web", "static"))
+	// 5. Ruta principal que muestra la UI
+	router.GET("/", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "index.html", nil)
+	})
+
+	// 6. Endpoints REST
 	router.GET("/health", healthHandler)
-	// 2. Crear libro
 	router.POST("/books", createBookHandler)
-	// 3. Listar todos los libros
 	router.GET("/books", getBooksHandler)
-	// 4. Obtener libro por ID
 	router.GET("/books/:id", getBookByIDHandler)
-	// 5. Actualizar libro
 	router.PUT("/books/:id", updateBookHandler)
-	// 6. Eliminar libro
 	router.DELETE("/books/:id", deleteBookHandler)
-	// 7. Buscar por título (query param)
 	router.GET("/books/search", searchBooksHandler)
-	// 8. Filtrar por género
 	router.GET("/books/genre/:genre", genreBooksHandler)
-	// 9. Filtrar por autor
 	router.GET("/books/author/:author", authorBooksHandler)
-	// 10. Listar géneros disponibles
 	router.GET("/genres", genresHandler)
 
-	// Escucha en el puerto 8080
-	router.Run(":8080")
+	// 7. Iniciar servidor
+	if err := router.Run(":8080"); err != nil {
+		panic("Error iniciando servidor: " + err.Error())
+	}
 }
 
+// healthHandler comprueba el estado de salud del microservicio.
 func healthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// createBookHandler recibe un JSON y registra un nuevo libro.
 func createBookHandler(c *gin.Context) {
 	var newBook models.Book
 	if err := c.ShouldBindJSON(&newBook); err != nil {
@@ -159,16 +94,21 @@ func createBookHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	saveData()
+	if err := saveData(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusCreated, newBook)
 }
 
+// getBooksHandler lista todos los libros.
 func getBooksHandler(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()
 	c.JSON(http.StatusOK, books)
 }
 
+// getBookByIDHandler obtiene un libro por su ID.
 func getBookByIDHandler(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -186,6 +126,7 @@ func getBookByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Libro no encontrado"})
 }
 
+// updateBookHandler actualiza los campos de un libro existente.
 func updateBookHandler(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -213,7 +154,10 @@ func updateBookHandler(c *gin.Context) {
 			if upd.Year != 0 {
 				books[i].Year = upd.Year
 			}
-			saveData()
+			if err := saveData(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusOK, books[i])
 			return
 		}
@@ -221,6 +165,7 @@ func updateBookHandler(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Libro no encontrado"})
 }
 
+// deleteBookHandler elimina un libro por ID.
 func deleteBookHandler(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -232,7 +177,10 @@ func deleteBookHandler(c *gin.Context) {
 	for i, b := range books {
 		if b.ID == id {
 			books = append(books[:i], books[i+1:]...)
-			saveData()
+			if err := saveData(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"deleted": true})
 			return
 		}
@@ -240,6 +188,7 @@ func deleteBookHandler(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Libro no encontrado"})
 }
 
+// searchBooksHandler busca libros por título.
 func searchBooksHandler(c *gin.Context) {
 	title := c.Query("title")
 	mu.Lock()
@@ -248,6 +197,7 @@ func searchBooksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
+// genreBooksHandler filtra libros por género.
 func genreBooksHandler(c *gin.Context) {
 	genre := c.Param("genre")
 	mu.Lock()
@@ -256,6 +206,7 @@ func genreBooksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
+// authorBooksHandler filtra libros por autor.
 func authorBooksHandler(c *gin.Context) {
 	author := c.Param("author")
 	mu.Lock()
@@ -264,6 +215,7 @@ func authorBooksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
+// genresHandler lista todos los géneros disponibles.
 func genresHandler(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()

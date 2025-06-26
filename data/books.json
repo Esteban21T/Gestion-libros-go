@@ -5,5 +5,19 @@
     "author": "George Orwell",
     "genre": "Ficcion",
     "year": 1949
+  },
+  {
+    "id": 2,
+    "title": "Un hombre muerto a puntapies\r\n",
+    "author": "Pablo Palacio\r\n",
+    "genre": "Realismo\r\n",
+    "year": 1986
+  },
+  {
+    "id": 3,
+    "title": "el psicoanalista",
+    "author": "john katzenbach",
+    "genre": "suspenso",
+    "year": 2017
   }
 ]
