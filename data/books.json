@@ -19,5 +19,12 @@
     "author": "john katzenbach",
     "genre": "suspenso",
     "year": 2017
+  },
+  {
+    "id": 4,
+    "title": "100 años de soledad",
+    "author": "Gabriel García Márquez",
+    "genre": "Novela",
+    "year": 1982
   }
 ]
